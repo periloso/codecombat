@@ -3,21 +3,28 @@ utils = require 'core/utils'
 CocoClass = require 'core/CocoClass'
 loadingScreenTemplate = require 'templates/core/loading'
 loadingErrorTemplate = require 'templates/core/loading-error'
+require('app/styles/core/loading-error.sass')
+auth = require 'core/auth'
+ViewVisibleTimer = require 'core/ViewVisibleTimer'
+storage = require 'core/storage'
 
-lastToggleModalCall = 0
 visibleModal = null
 waitingModal = null
 classCount = 0
 makeScopeName = -> "view-scope-#{classCount++}"
 doNothing = ->
+ViewLoadTimer = require 'core/ViewLoadTimer'
 
 module.exports = class CocoView extends Backbone.View
   cache: false # signals to the router to keep this view around
+  retainSubviews: false # set to true if you don't want subviews to be destroyed whenever the view renders
   template: -> ''
 
   events:
-    'click .retry-loading-resource': 'onRetryResource'
-    'click .skip-loading-resource': 'onSkipResource'
+    'click #loading-error .login-btn': 'onClickLoadingErrorLoginButton'
+    'click #loading-error #create-account-btn': 'onClickLoadingErrorCreateAccountButton'
+    'click #loading-error #logout-btn': 'onClickLoadingErrorLogoutButton'
+    'click .contact-modal': 'onClickContactModal'
 
   subscriptions: {}
   shortcuts: {}
@@ -51,9 +58,16 @@ module.exports = class CocoView extends Backbone.View
     @listenTo(@supermodel, 'failed', @onResourceLoadFailed)
     @warnConnectionError = _.throttle(@warnConnectionError, 3000)
 
+    # Warn about easy-to-create race condition that only shows up in production
+    listenedSupermodel = @supermodel
+    _.defer =>
+      if listenedSupermodel isnt @supermodel and not @destroyed
+        throw new Error("#{@constructor?.name ? @}: Supermodel listeners not hooked up! Don't reassign @supermodel; CocoView does that for you.")
+
     super arguments...
 
   destroy: ->
+    @viewVisibleTimer?.destroy()
     @stopListening()
     @off()
     @stopListeningToShortcuts()
@@ -69,6 +83,28 @@ module.exports = class CocoView extends Backbone.View
     @destroy = doNothing
     $.noty.closeAll()
 
+  trackTimeVisible: ({ trackViewLifecycle } = {}) ->
+    return if @viewVisibleTimer
+    @viewVisibleTimer = new ViewVisibleTimer()
+    @trackViewLifecycle = trackViewLifecycle
+
+  # Report the currently visible feature — this is the default handler for whole-view tracking
+  # Views with more involved features should implement this method instead.
+  currentVisiblePremiumFeature: ->
+    if @trackViewLifecycle
+      return { viewName: @.id }
+    else
+      return null
+
+  updateViewVisibleTimer: ->
+    return if not @viewVisibleTimer
+    visibleFeature = not @hidden and not @destroyed and @currentVisiblePremiumFeature()
+    if visibleFeature and not _.isEqual(visibleFeature, @viewVisibleTimer.featureData)
+      @viewVisibleTimer.stopTimer({ clearName: true })
+      @viewVisibleTimer.startTimer(visibleFeature)
+    else if not visibleFeature
+      @viewVisibleTimer.stopTimer({ clearName: true })
+
   destroyAceEditor: (editor) ->
     # convenience method to make sure the ace editor is as destroyed as can be
     return unless editor
@@ -77,11 +113,19 @@ module.exports = class CocoView extends Backbone.View
     editor.destroy()
 
   afterInsert: ->
+    if storage.load('sub-modal-continue')
+      subModalContinue = storage.load('sub-modal-continue')
+      storage.remove('sub-modal-continue')
+      _.defer =>
+        SubscribeModal = require 'views/core/SubscribeModal'
+        @openModalView new SubscribeModal({subModalContinue})
+    @updateViewVisibleTimer()
 
   willDisappear: ->
     # the router removes this view but this view will be cached
     @undelegateEvents()
     @hidden = true
+    @updateViewVisibleTimer()
     @stopListeningToShortcuts()
     view.willDisappear() for id, view of @subviews
     $.noty.closeAll()
@@ -89,11 +133,26 @@ module.exports = class CocoView extends Backbone.View
   didReappear: ->
     # the router brings back this view from the cache
     @delegateEvents()
+    wasHidden = @hidden
     @hidden = false
-    @listenToShortcuts()
+    @updateViewVisibleTimer()
+    @listenToShortcuts() if wasHidden
     view.didReappear() for id, view of @subviews
 
+
   # View Rendering
+
+  isRTL: (s) ->
+    # Hebrew is 0x0590 - 0x05FF, which is adjacent to Arabic at 0x0600 - 0x06FF
+    /[\u0590-\u06FF]/.test s
+
+  applyRTLIfNeeded: ->
+    return unless me.get('preferredLanguage') in ['he', 'ar', 'fa', 'ur']
+    @$('[data-i18n]').each (i, el) =>
+      return unless @isRTL(el.innerHTML)
+      el.dir = 'rtl'
+      $(el).parentsUntil('table, form, noscript, div:not([class~="rtl-allowed"]):not([class~="form"]):not([class~="form-group"]):not([class~="form-group"]), [dir="ltr"]').attr('dir', 'rtl')
+      $(el).parents('div.form').attr('dir', 'rtl')
 
   renderSelectors: (selectors...) ->
     newTemplate = $(@template(@getRenderData()))
@@ -102,14 +161,22 @@ module.exports = class CocoView extends Backbone.View
         $(elPair[0]).replaceWith($(elPair[1]))
     @delegateEvents()
     @$el.i18n()
+    @applyRTLIfNeeded()
 
   render: ->
     return @ unless me
-    view.destroy() for id, view of @subviews
+    if @retainSubviews
+      oldSubviews = _.values(@subviews)
+    else
+      view.destroy() for id, view of @subviews
     @subviews = {}
     super()
     return @template if _.isString(@template)
     @$el.html @template(@getRenderData())
+
+    if @retainSubviews
+      for view in oldSubviews
+        @insertSubView(view)
 
     if not @supermodel.finished()
       @showLoading()
@@ -118,6 +185,7 @@ module.exports = class CocoView extends Backbone.View
 
     @afterRender()
     @$el.i18n()
+    @applyRTLIfNeeded()
     @
 
   getRenderData: (context) ->
@@ -133,6 +201,11 @@ module.exports = class CocoView extends Backbone.View
     context.view = @
     context._ = _
     context.document = document
+    context.i18n = utils.i18n
+    context.state = @state
+    context.serverConfig = window.serverConfig
+    context.serverSession = window.serverSession
+    context.features = window.features
     context
 
   afterRender: ->
@@ -155,60 +228,43 @@ module.exports = class CocoView extends Backbone.View
   # Error handling for loading
   onResourceLoadFailed: (e) ->
     r = e.resource
+    if r.value
+      @stopListening @supermodel
     return if r.jqxhr?.status is 402 # payment-required failures are handled separately
-    if r.jqxhr?.status is 0
-      r.retries ?= 0
-      r.retries += 1
-      if r.retries > 20
-        msg = 'Your computer or our servers appear to be offline. Please try refreshing.'
-        noty text: msg, layout: 'center', type: 'error', killer: true
-        return
-      else
-        @warnConnectionError()
-        return _.delay (=> r.load()), 3000
-
-    @$el.find('.loading-container .errors').append(loadingErrorTemplate({
-      status: r.jqxhr?.status
-      name: r.name
-      resourceIndex: r.rid,
-      responseText: r.jqxhr?.responseText
-    })).i18n()
-    @$el.find('.progress').hide()
+    @showError(r.jqxhr)
 
   warnConnectionError: ->
     msg = $.i18n.t 'loading_error.connection_failure', defaultValue: 'Connection failed.'
     noty text: msg, layout: 'center', type: 'error', killer: true, timeout: 3000
 
-  onRetryResource: (e) ->
-    res = @supermodel.getResource($(e.target).data('resource-index'))
-    # different views may respond to this call, and not all have the resource to reload
-    return unless res and res.isFailed
-    res.load()
-    @$el.find('.progress').show()
-    $(e.target).closest('.loading-error-alert').remove()
+  onClickContactModal: (e) ->
+    if me.isStudent()
+      console.error("Student clicked contact modal.")
+      return
+    if me.isTeacher(true)
+      if application.isProduction()
+        window.Intercom?('show')
+      else
+        alert('Teachers, Intercom widget only available in production.')
+    else
+      ContactModal = require 'views/core/ContactModal'
+      @openModalView(new ContactModal())
 
-  onSkipResource: (e) ->
-    res = @supermodel.getResource($(e.target).data('resource-index'))
-    return unless res and res.isFailed
-    res.markLoaded()
-    @$el.find('.progress').show()
-    $(e.target).closest('.loading-error-alert').remove()
+  onClickLoadingErrorLoginButton: (e) ->
+    e.stopPropagation() # Backbone subviews and superviews will handle this call repeatedly otherwise
+    AuthModal = require 'views/core/AuthModal'
+    @openModalView(new AuthModal())
+
+  onClickLoadingErrorCreateAccountButton: (e) ->
+    e.stopPropagation()
+    CreateAccountModal = require 'views/core/CreateAccountModal'
+    @openModalView(new CreateAccountModal({mode: 'signup'}))
+
+  onClickLoadingErrorLogoutButton: (e) ->
+    e.stopPropagation()
+    auth.logoutUser()
 
   # Modals
-
-  @lastToggleModalCall = 0
-
-  toggleModal: (e) ->
-    if $(e.currentTarget).prop('target') is '_blank'
-      return true
-    # special handler for opening modals that are dynamically loaded, rather than static in the page. It works (or should work) like Bootstrap's modals, except use coco-modal for the data-toggle value.
-    elem = $(e.target)
-    return unless elem.data('toggle') is 'coco-modal'
-    return if elem.attr('disabled')
-    target = elem.data('target')
-    Modal = require 'views/'+target
-    e.stopPropagation()
-    @openModalView new Modal supermodel: @supermodal
 
   openModalView: (modalView, softly=false) ->
     return if waitingModal # can only have one waiting at once
@@ -217,8 +273,17 @@ module.exports = class CocoView extends Backbone.View
       return if softly
       return visibleModal.hide() if visibleModal.$el.is(':visible') # close, then this will get called again
       return @modalClosed(visibleModal) # was closed, but modalClosed was not called somehow
+    viewLoad = new ViewLoadTimer(modalView)
     modalView.render()
-    $('#modal-wrapper').empty().append modalView.el
+
+    # Redirect to the woo when trying to log in or signup
+    if features.codePlay
+      if modalView.id is 'create-account-modal'
+        return document.location.href = '//lenovogamestate.com/register/?cocoId='+me.id
+      if modalView.id is 'auth-modal'
+        return document.location.href = '//lenovogamestate.com/login/?cocoId='+me.id
+
+    $('#modal-wrapper').removeClass('hide').empty().append modalView.el
     modalView.afterInsert()
     visibleModal = modalView
     modalOptions = {show: true, backdrop: if modalView.closesOnClickOutside then true else 'static'}
@@ -226,13 +291,16 @@ module.exports = class CocoView extends Backbone.View
     window.currentModal = modalView
     @getRootView().stopListeningToShortcuts(true)
     Backbone.Mediator.publish 'modal:opened', {}
+    viewLoad.record()
+    return modalView
 
   modalClosed: =>
     visibleModal.willDisappear() if visibleModal
-    visibleModal.destroy()
+    visibleModal?.destroy()
     visibleModal = null
     window.currentModal = null
     #$('#modal-wrapper .modal').off 'hidden.bs.modal', @modalClosed
+    $('#modal-wrapper').addClass('hide')
     if waitingModal
       wm = waitingModal
       waitingModal = null
@@ -246,6 +314,7 @@ module.exports = class CocoView extends Backbone.View
   showLoading: ($el=@$el) ->
     $el.find('>').addClass('hidden')
     $el.append(loadingScreenTemplate()).i18n()
+    @applyRTLIfNeeded()
     @_lastLoading = $el
 
   hideLoading: ->
@@ -253,6 +322,24 @@ module.exports = class CocoView extends Backbone.View
     @_lastLoading.find('.loading-screen').remove()
     @_lastLoading.find('>').removeClass('hidden')
     @_lastLoading = null
+
+  showError: (jqxhr) ->
+    return unless @_lastLoading?
+    context = {
+      jqxhr: jqxhr
+      view: @
+      me: me
+    }
+    @_lastLoading.find('.loading-screen').replaceWith((loadingErrorTemplate(context)))
+    @_lastLoading.i18n()
+    @applyRTLIfNeeded()
+
+  forumLink: ->
+    link = 'http://discourse.codecombat.com/'
+    lang = (me.get('preferredLanguage') or 'en-US').split('-')[0]
+    if lang in ['zh', 'ru', 'es', 'fr', 'pt', 'de', 'nl', 'lt']
+      link += "c/other-languages/#{lang}"
+    link
 
   showReadOnly: ->
     return if me.isAdmin() or me.isArtisan()
@@ -300,11 +387,20 @@ module.exports = class CocoView extends Backbone.View
     key = @makeSubViewKey(view)
     @subviews[key].destroy() if key of @subviews
     elToReplace ?= @$el.find('#'+view.id)
-    elToReplace.after(view.el).remove()
-    @registerSubView(view, key)
-    view.render()
-    view.afterInsert()
-    view
+    if @retainSubviews
+      @registerSubView(view, key)
+      if elToReplace[0]
+        view.setElement(elToReplace[0])
+        view.render()
+        view.afterInsert()
+      return view
+
+    else
+      elToReplace.after(view.el).remove()
+      @registerSubView(view, key)
+      view.render()
+      view.afterInsert()
+      return view
 
   registerSubView: (view, key) ->
     # used to register views which are custom inserted into the view,
@@ -385,7 +481,7 @@ module.exports = class CocoView extends Backbone.View
     setTimeout (=> $pointer.css transition: 'all 0.4s ease-in', transform: "rotate(#{@pointerRotation}rad) translate(-3px, #{@pointerRadialDistance}px)"), 800
 
   endHighlight: ->
-    @getPointer(false).css({'opacity': 0.0, 'transition': 'none', top: '-50px', right: '-50px'}) 
+    @getPointer(false).css({'opacity': 0.0, 'transition': 'none', top: '-50px', right: '-50px'})
     clearInterval @pointerInterval
     clearTimeout @pointerDelayTimeout
     clearTimeout @pointerDurationTimeout
@@ -400,9 +496,6 @@ module.exports = class CocoView extends Backbone.View
 
   # Utilities
 
-  getQueryVariable: (param, defaultValue) -> CocoView.getQueryVariable(param, defaultValue)
-  @getQueryVariable: (param, defaultValue) -> utils.getQueryVariable(param, defaultValue)  # Moved to utils; TODO finish migrating
-
   getRootView: ->
     view = @
     view = view.parent while view.parent?
@@ -412,9 +505,7 @@ module.exports = class CocoView extends Backbone.View
     ua = navigator.userAgent or navigator.vendor or window.opera
     return mobileRELong.test(ua) or mobileREShort.test(ua.substr(0, 4))
 
-  isIE: ->
-    # http://stackoverflow.com/questions/19999388/jquery-check-if-user-is-using-ie
-    navigator.userAgent.indexOf('MSIE') > 0 or !!navigator.userAgent.match(/Trident.*rv\:11\./)
+  isIE: utils.isIE
 
   isMac: ->
     navigator.platform.toUpperCase().indexOf('MAC') isnt -1
@@ -429,12 +520,12 @@ module.exports = class CocoView extends Backbone.View
   isFirefox: ->
     navigator.userAgent.toLowerCase().indexOf('firefox') isnt -1
 
-  initSlider: ($el, startValue, changeCallback) ->
-    slider = $el.slider({animate: 'fast'})
-    slider.slider('value', startValue)
-    slider.on('slide', changeCallback)
-    slider.on('slidechange', changeCallback)
-    slider
+  scrollToLink: (link, speed=300) ->
+    scrollTo = $(link).offset().top
+    $('html, body').animate({ scrollTop: scrollTo }, speed)
+
+  scrollToTop: (speed=300) ->
+    $('html, body').animate({ scrollTop: 0 }, speed)
 
   toggleFullscreen: (e) ->
     # https://developer.mozilla.org/en-US/docs/Web/Guide/API/DOM/Using_full_screen_mode?redirectlocale=en-US&redirectslug=Web/Guide/DOM/Using_full_screen_mode
@@ -465,6 +556,41 @@ module.exports = class CocoView extends Backbone.View
 
   playSound: (trigger, volume=1) ->
     Backbone.Mediator.publish 'audio-player:play-sound', trigger: trigger, volume: volume
+
+  tryCopy: ->
+    try
+      document.execCommand('copy')
+    catch err
+      message = 'Oops, unable to copy'
+      noty text: message, layout: 'topCenter', type: 'error', killer: false
+
+  wait: (event) -> new Promise((resolve) => @once(event, resolve))
+
+  onClickTranslatedElement: (e) ->
+    return unless (key.ctrl or key.command) and key.alt
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    i18nKey = _.last($(e.currentTarget).data('i18n').split(';')).replace(/\[.*?\]/, '')
+    base = $.i18n.t(i18nKey, {lng: 'en'})
+    translated = $.i18n.t(i18nKey)
+    en = require('locale/en')
+    [clickedSection, clickedKey] = i18nKey.split('.')
+    lineNumber = 2
+    found = false
+    for enSection, enEntries of en.translation
+      for enKey, enValue of enEntries
+        ++lineNumber
+        if clickedSection is enSection and clickedKey is enKey
+          found = true
+          break
+      break if found
+      lineNumber += 2
+    unless found
+      return console.log "Couldn't find #{i18nKey} in app/locale/en.coffee."
+    targetLanguage = me.get('preferredLanguage') or 'en'
+    targetLanguage = 'en' if targetLanguage.split('-')[0] is 'en'
+    githubUrl = "https://github.com/codecombat/codecombat/blob/master/app/locale/#{targetLanguage}.coffee#L#{lineNumber}"
+    window.open githubUrl, target: '_blank'
 
 mobileRELong = /(android|bb\d+|meego).+mobile|avantgo|bada\/|blackberry|blazer|compal|elaine|fennec|hiptop|iemobile|ip(hone|od)|iris|kindle|lge |maemo|midp|mmp|mobile.+firefox|netfront|opera m(ob|in)i|palm( os)?|phone|p(ixi|re)\/|plucker|pocket|psp|series(4|6)0|symbian|treo|up\.(browser|link)|vodafone|wap|windows ce|xda|xiino/i
 

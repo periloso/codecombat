@@ -1,4 +1,5 @@
 SpriteBuilder = require 'lib/sprites/SpriteBuilder'
+createjs = require 'lib/createjs-parts'
 
 # Put this on MovieClips
 specialGoToAndStop = (frame) ->
@@ -8,7 +9,7 @@ specialGoToAndStop = (frame) ->
     @gotoAndStop(frame)
     @childrenCopy = @children.slice(0)
 
-module.exports = class SegmentedSprite extends createjs.SpriteContainer
+module.exports = class SegmentedSprite extends createjs.Container
   childMovieClips: null
 
   constructor: (@spriteSheet, @thangType, @spriteSheetPrefix, @resolutionFactor=SPRITE_RESOLUTION_FACTOR) ->
@@ -153,7 +154,12 @@ module.exports = class SegmentedSprite extends createjs.SpriteContainer
 #          console.debug 'Did not dereference args:', args
           stopped = true
           break
-        tween = tween[func.n](args...)
+        if tween[func.n]
+          tween = tween[func.n](args...)
+        else
+          # If we, say, skipped a shadow get(), then the wait() may not be present
+          stopped = true
+          break
       continue if stopped
       anim.timeline.addTween(tween)
 
@@ -169,7 +175,7 @@ module.exports = class SegmentedSprite extends createjs.SpriteContainer
   buildMovieClipContainers: (localContainers) ->
     map = {}
     for localContainer in localContainers
-      outerContainer = new createjs.SpriteContainer(@spriteSheet)
+      outerContainer = new createjs.Container(@spriteSheet)
       innerContainer = new createjs.Sprite(@spriteSheet)
       innerContainer.gotoAndStop(@spriteSheetPrefix + localContainer.gn)
       if innerContainer.currentFrame is 0 or @usePlaceholders
@@ -263,7 +269,7 @@ module.exports = class SegmentedSprite extends createjs.SpriteContainer
   takeChildrenFromMovieClip: (movieClip, recipientContainer) ->
     for child in movieClip.childrenCopy
       if child instanceof createjs.MovieClip
-        childRecipient = new createjs.SpriteContainer(@spriteSheet)
+        childRecipient = new createjs.Container(@spriteSheet)
         @takeChildrenFromMovieClip(child, childRecipient)
         for prop in ['regX', 'regY', 'rotation', 'scaleX', 'scaleY', 'skewX', 'skewY', 'x', 'y']
           childRecipient[prop] = child[prop]
@@ -272,5 +278,5 @@ module.exports = class SegmentedSprite extends createjs.SpriteContainer
         recipientContainer.addChild(child)
 
 
-#  _getBounds: createjs.SpriteContainer.prototype.getBounds
+#  _getBounds: createjs.Container.prototype.getBounds
 #  getBounds: -> @baseMovieClip?.getBounds() or @children[0]?.getBounds() or @_getBounds()

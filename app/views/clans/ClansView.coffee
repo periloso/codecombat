@@ -1,5 +1,5 @@
-app = require 'core/application'
-AuthModal = require 'views/core/AuthModal'
+require('app/styles/clans/clans.sass')
+CreateAccountModal = require 'views/core/CreateAccountModal'
 RootView = require 'views/core/RootView'
 template = require 'templates/clans/clans'
 CocoCollection = require 'collections/CocoCollection'
@@ -14,34 +14,32 @@ module.exports = class ClansView extends RootView
   id: 'clans-view'
   template: template
 
+
   events:
     'click .create-clan-btn': 'onClickCreateClan'
     'click .join-clan-btn': 'onJoinClan'
     'click .leave-clan-btn': 'onLeaveClan'
     'click .private-clan-checkbox': 'onClickPrivateCheckbox'
 
-  constructor: (options) ->
-    super options
-    @initData()
+  initialize: ->
+    @publicClansArray = []
+    @myClansArray = []
+    @idNameMap = {}
+    @loadData()
 
   destroy: ->
     @stopListening?()
-
-  getRenderData: ->
-    context = super()
-    context.idNameMap = @idNameMap
-    context.publicClans = _.filter(@publicClans.models, (clan) -> clan.get('type') is 'public')
-    context.myClans = @myClans.models
-    context.myClanIDs = me.get('clans') ? []
-    context
 
   afterRender: ->
     super()
     @setupPrivateInfoPopover()
 
-  initData: ->
-    @idNameMap = {}
+  onLoaded: ->
+    super()
+    @publicClansArray = _.filter(@publicClans.models, (clan) -> clan.get('type') is 'public')
+    @myClansArray = @myClans.models
 
+  loadData: ->
     sortClanList = (a, b) ->
       if a.get('memberCount') isnt b.get('memberCount')
         if a.get('memberCount') < b.get('memberCount') then 1 else -1
@@ -52,12 +50,15 @@ module.exports = class ClansView extends RootView
       @refreshNames @publicClans.models
       @render?()
     @supermodel.loadCollection(@publicClans, 'public_clans', {cache: false})
+
     @myClans = new CocoCollection([], { url: "/db/user/#{me.id}/clans", model: Clan, comparator: sortClanList })
     @listenTo @myClans, 'sync', =>
       @refreshNames @myClans.models
       @render?()
     @supermodel.loadCollection(@myClans, 'my_clans', {cache: false})
+
     @listenTo me, 'sync', => @render?()
+    @myClanIDs = me.get('clans') ? []
 
   refreshNames: (clans) ->
     clanIDs = _.filter(clans, (clan) -> clan.get('type') is 'public')
@@ -72,7 +73,7 @@ module.exports = class ClansView extends RootView
     @supermodel.addRequestResource('user_names', options, 0).load()
 
   setupPrivateInfoPopover: ->
-    popoverTitle = "<h3>" + $.i18n.t('teachers.sub_includes_7') + "</h3>"
+    popoverTitle = "<h3>" + $.i18n.t('clans.private_clans') + "</h3>"
     popoverContent = "<ul>"
     popoverContent += "<li><span style='font-weight:bold;'>" + $.i18n.t('clans.track_concepts1') + "</span> " + $.i18n.t('clans.track_concepts2b')
     popoverContent += "<li>" + $.i18n.t('clans.track_concepts3b')
@@ -93,7 +94,7 @@ module.exports = class ClansView extends RootView
     )
 
   onClickCreateClan: (e) ->
-    return @openModalView new AuthModal() if me.isAnonymous()
+    return @openModalView new CreateAccountModal() if me.isAnonymous()
     clanType = if $('.private-clan-checkbox').prop('checked') then 'private' else 'public'
     if clanType is 'private' and not me.isPremium()
       @openModalView new SubscribeModal()
@@ -108,13 +109,13 @@ module.exports = class ClansView extends RootView
         error: (model, response, options) =>
           console.error 'Error saving clan', response.status
         success: (model, response, options) =>
-          app.router.navigate "/clans/#{model.id}"
+          application.router.navigate "/clans/#{model.id}"
           window.location.reload()
     else
       console.log 'Invalid name'
 
   onJoinClan: (e) ->
-    return @openModalView(new AuthModal()) if me.isAnonymous()
+    return @openModalView(new CreateAccountModal()) if me.isAnonymous()
     if clanID = $(e.target).data('id')
       options =
         url: "/db/clan/#{clanID}/join"
@@ -122,7 +123,7 @@ module.exports = class ClansView extends RootView
         error: (model, response, options) =>
           console.error 'Error joining clan', response
         success: (model, response, options) =>
-          app.router.navigate "/clans/#{clanID}"
+          application.router.navigate "/clans/#{clanID}"
           window.location.reload()
       @supermodel.addRequestResource( 'join_clan', options).load()
     else
@@ -144,7 +145,7 @@ module.exports = class ClansView extends RootView
       console.error "No clan ID attached to leave button."
 
   onClickPrivateCheckbox: (e) ->
-    return @openModalView new AuthModal() if me.isAnonymous()
+    return @openModalView new CreateAccountModal() if me.isAnonymous()
     if $('.private-clan-checkbox').prop('checked') and not me.isPremium()
       $('.private-clan-checkbox').attr('checked', false)
       @openModalView new SubscribeModal()

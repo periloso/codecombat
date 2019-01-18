@@ -1,3 +1,4 @@
+require('app/styles/admin/trial-requests.sass')
 RootView = require 'views/core/RootView'
 template = require 'templates/admin/trial-requests'
 CocoCollection = require 'collections/CocoCollection'
@@ -30,7 +31,7 @@ module.exports = class TrialRequestsView extends RootView
           -1
         else
           1
-      @trialRequests = new CocoCollection([], { url: '/db/trial.request?conditions[sort]=-created&conditions[limit]=500', model: TrialRequest, comparator: sortRequests })
+      @trialRequests = new CocoCollection([], { url: '/db/trial.request?conditions[sort]="-created"&conditions[limit]=1000', model: TrialRequest, comparator: sortRequests })
       @supermodel.loadCollection(@trialRequests, 'trial-requests', {cache: false})
 
   getRenderData: ->

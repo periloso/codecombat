@@ -2,6 +2,9 @@ fs = require 'fs'
 path = require 'path'
 en = require('../app/locale/en').translation
 
+# Generate rot13 locale
+require('./generateRot13Locale.coffee')
+
 enSource = fs.readFileSync(path.join(__dirname, '../app/locale/en.coffee'), encoding='utf8')
 commentsMap = {}
 
@@ -25,7 +28,7 @@ for section in splitByCategories
       commentsMap[category][comment[1]] = comment[2]
 
 dir = fs.readdirSync 'app/locale'
-for file in dir when not (file in ['locale.coffee', 'en.coffee'])
+for file in dir when not (file in ['locale.coffee', 'en.coffee', 'rot13.coffee'])
   fileSource = fs.readFileSync 'app/locale/' + file, encoding='utf8'
   contents = require('../app/locale/' + file)
   categories = contents.translation
@@ -53,6 +56,9 @@ for file in dir when not (file in ['locale.coffee', 'en.coffee'])
         if fileSource.search(new RegExp("^    #{enTag}: \"#{escapedTag}\".*\{change\}.*", 'm')) >= 0 and comment.search(/.*\{change\}/) < 0
           comment = " \#" + comment if comment is ""
           comment = comment + " {change}"
+
+      unless /^[a-z0-9_]+$/i.test enTag
+        enTag = '"' + enTag + '"'  # Since || doesn't work as a key, needs to be "||"
 
       lines.push "#{if tagMissing then '#' else ''}    #{enTag}: \"#{tag}\"#{comment}"
   newContents = lines.join('\n') + '\n'

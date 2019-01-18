@@ -1,148 +1,123 @@
-extends /templates/base
+extends /templates/base-flat
+
+block page_nav
+  include ./teacher-dashboard-nav.jade
 
 block content
+  if !me.isTeacher() && view.ownedClassrooms.size() && !me.isAdmin()
+    .alert.alert-danger.text-center
+      .container
+        // DNT: Temporary
+        h3 ATTENTION: Please upgrade your account to a Teacher Account.
+        p
+          | We are transitioning to a new improved classroom management system for instructors.
+          | Please convert your account to ensure you retain access to your classrooms.
+        a.btn.btn-primary.btn-lg(href="/teachers/update-account") Upgrade to teacher account
 
-  .text-center
-    if me.isAnonymous() || !me.get('name')
-      .welcome Welcome!
-    else
-      .welcome Welcome, #{me.get('name')}!
+  .container(dir="auto")
+    h1(data-i18n="nav.courses")
+    h2(data-i18n="courses.subtitle")
+    //- p
+    //-   a(href="https://discourse.codecombat.com/t/course-level-changelog/7352" data-i18n="courses.changelog")
 
-  .container-fluid
-    .row
-      .col-md-2
-      .col-md-8
-        .well
-          .text-center
-            strong.uppercase Getting Started with Courses
-          br
-          .text-center
-            a.btn.btn-info(href='http://codecombat.com/docs/CodeCombatHourofCodeGettingStartedGuide.pdf') Download Getting Started Guide [PDF]
-          br
-          ol
-            li Create a new class by clicking the green "Create New Class" button below.
-            li Once you've created a class, click the blue "Add Students" button.
-            li You'll see student's progress below as they sign up and join your class.
-          br
-          .text-center
-            strong Additional Resources
-          ul
-            li
-              span.spr Download/print our
-              a.spr(href='http://codecombat.com/docs/CodeCombatTeacherGuideCourse1.pdf') Course 1 Teacher's Guide
-              span for explanations and solutions to each level.
-            li
-              span.spr Complete our
-              a.spr(href='/teachers/freetrial') Teacher Survey
-              span to get 15 more hours of content for FREE for 2 months.
-            li
-              span.spr Visit our
-              a.spr(href='http://discourse.codecombat.com/c/teachers') Teacher Forums
-              span to connect to fellow educators who are using CodeCombat.
-
-  .section-header Your Classes
-
-  if view.classrooms.models.length > 0
-    .container-fluid
-      each classroom in view.classrooms.models
-        +classroom(classroom)
-  else
-    .no-students No classes yet!
-
-  .text-center
-    button.btn.btn-lg.btn-success.uppercase.create-new-class create new class
-
-  br
-  .section-header Available Courses
-  
-  if !me.isAnonymous()
-    p.text-center
-      strong.spr Unused enrollments available:
-      strong.spr= view.prepaids.totalAvailable()
-      a.btn.btn-success.btn(href="/courses/purchase") Purchase Enrollments
-    
-  p
-    | All students get access to Introduction to Computer Science for free.
-    | One enrollment per student is required to assign them to paid CodeCombat courses.
-    | A single student does not need multiple enrollments to access all paid courses.
-    
-  .container-fluid
+  .courses.container(dir="auto")
     - var courses = view.courses.models;
-    - var i = 0;
-    while i < courses.length
-      - var course = courses[i];
-      - i++;
-      .row
-        .col-md-6
+    - var courseIndex = 0;
+    while courseIndex < courses.length
+      - var course = courses[courseIndex];
+      - courseIndex++;
+      .course.row
+        .col-sm-9
           +course-info(course)
-        if i < courses.length
-          - course = courses[i];
-          - i++;
-          .col-md-6
-            +course-info(course)
-
-block footer
-
-mixin classroom(classroom)
-  .row
-    - var classMemberCount = classroom.get('members') ? classroom.get('members').length : 0;
-    if classMemberCount > 0
-      .col-md-8
-        p
-          span.spr.class-name= classroom.get('name')
-          if classroom.get('aceConfig') && classroom.get('aceConfig').language === 'javascript'
-            span.spr.class-name (JavaScript)
-          else
-            span.spr.class-name (Python)
-          a.edit-classroom-small(data-i18n="courses.edit_settings", data-classroom-id="#{classroom.id}")
-          .active-courses active courses
-          - var courseInstances = view.courseInstances.where({classroomID: classroom.id});
-          each courseInstance in courseInstances
-            +course(courseInstance, classMemberCount)
-    else
-      .col-md-12
-        p
-          span.spr.class-name= classroom.get('name')
-          if classroom.get('aceConfig') && classroom.get('aceConfig').language === 'javascript'
-            span.spr.class-name (JavaScript)
-          else
-            span.spr.class-name (Python)
-          a.edit-classroom-small(data-i18n="courses.edit_settings", data-classroom-id="#{classroom.id}")
-        .no-students No students yet!
-        .text-center
-          button.btn.btn-info.uppercase.btn-add-students(data-classroom-id="#{classroom.id}") add students
-        br
-    if classMemberCount > 0
-      .col-md-4.text-center
-        .class-count= classMemberCount
-        .active-courses(style='margin:6px;') students
-        a.btn.btn-info.uppercase(href='/courses/#{classroom.id}') view/edit
-  .row
-    .col-md-12
-      .divider
-
-mixin course(courseInstance, classMemberCount)
-  - var courseMemberCount = courseInstance.get('members') ? courseInstance.get('members').length : 0;
-  if courseMemberCount > 0
-    - var course = view.courses.get(courseInstance.get('courseID'));
-    p
-      .course-name= course.get('name')
-      .course-enrolled #{courseMemberCount} / #{classMemberCount} students enrolled
-      each concept in course.get('concepts')
-        span.spr.course-concept(data-i18n="concepts." + concept)
+        if me.isTeacher() || me.isAdmin()
+          .col-sm-3
+            .play-level-form(data-course-id=course.id)
+              .form-group
+                label.control-label
+                  span(data-i18n="courses.select_language")
+                  | :
+                  select.language-select.form-control
+                    //- TODO: Automate this list @scott
+                    //- Web dev courses use HTML and JavaScript, except web-development-1 which doesn't have scripting
+                    if course.id === view.utils.courseIDs.WEB_DEVELOPMENT_1
+                      option(value="javascript")
+                        | HTML
+                    else if course.id === view.utils.courseIDs.WEB_DEVELOPMENT_2
+                      option(value="javascript")
+                        | HTML / JavaScript
+                    else
+                      option(value="python")
+                        | Python
+                      option(value="javascript")
+                        | JavaScript
+              .form-group
+                label.control-label
+                  span(data-i18n="courses.select_level")
+                  | :
+                  select.level-select.form-control
+                    if view.campaigns.loaded
+                      - var campaign = view.campaigns.get(course.get('campaignID'))
+                      if campaign && view.campaignLevelNumberMap[campaign.id]
+                        each level, levelIndex in campaign.getLevels().models
+                          option(value=level.get('slug'))
+                            if level.get('assessment')
+                              if level.get('assessment') === 'cumulative'
+                                =$.t('play_level.combo_challenge')
+                              else
+                                =$.t('play_level.concept_challenge')
+                              =":"
+                            else
+                              span #{view.campaignLevelNumberMap[campaign.id][level.get('original')]}.
+                            = " "
+                            span
+                              = i18n(level.attributes, 'name').replace('Course: ', '')
+              a.play-level-button.btn.btn-lg.btn-primary
+                span(data-i18n="courses.play_level")
+            .clearfix
 
 mixin course-info(course)
-  .media
-    img.media-object(src=course.get('screenshot'))
-    .media-body
-      span.spr.course-name= course.get('name')
-      p= course.get('description')
+  - var campaign = view.campaigns.get(course.get('campaignID'));
+  .course-info
+    .text-h4.semibold
+      = i18n(course.attributes, 'name')
+    p= i18n(course.attributes, 'description')
+    p.concepts.semibold
+      span(data-i18n="courses.concepts_covered")
+      = ": "
+      each concept in course.get('concepts')
+        span(data-i18n="concepts." + concept)
+        if course.get('concepts').indexOf(concept) !== course.get('concepts').length - 1
+          span.spr ,
+
+    if course.id === view.utils.courseIDs.WEB_DEVELOPMENT_2
       p
-        strong.spr Concepts:
-        each concept in course.get('concepts')
-          span(data-i18n="concepts." + concept)
-          if course.get('concepts').indexOf(concept) !== course.get('concepts').length - 1
-            span.spr ,
+        i(data-i18n="courses.web_dev_language_transition")
+
+    if me.isTeacher() || view.ownedClassrooms.size() || me.isAdmin()
+      - var disableButtons = !course.get('free') && !view.paidTeacher;
+      if disableButtons
+        p
+          i(data-i18n="courses.solutions_require_licenses")
+      //- Web dev courses use HTML and JavaScript, except web-development-1 which doesn't have scripting
+      if course.id === view.utils.courseIDs.WEB_DEVELOPMENT_1
+        a.guide-btn.btn.btn-primary(disabled=disableButtons href=("/teachers/course-solution/" + course.id + "/html") data-course-id=course.id data-course-name=course.get('name') data-event-action="Classes Guides Guide JavaScript" class=(me.isTeacher() || me.isAdmin() ? '': 'disabled'))
+          span(data-i18n="courses.view_guide_online")
+          |  &mdash; HTML
+      else
+        a.guide-btn.btn.btn-primary(disabled=disableButtons href=("/teachers/course-solution/" + course.id + "/javascript") data-course-id=course.id data-course-name=course.get('name') data-event-action="Classes Guides Guide JavaScript" class=(me.isTeacher() || me.isAdmin() ? '': 'disabled'))
+          span(data-i18n="courses.view_guide_online")
+          |  &mdash; JavaScript
+        a.guide-btn.btn.btn-primary(disabled=disableButtons href=("/teachers/course-solution/" + course.id + "/python") data-course-id=course.id data-course-name=course.get('name') data-event-action="Classes Guides Guide Python" class=(me.isTeacher() || me.isAdmin() ? '': 'disabled'))
+          span(data-i18n="courses.view_guide_online")
+          |  &mdash; Python
+
+    if Object.keys(view.courseChangeLog[course.id] || []).length > 0
       p
-        strong.spr Length:
-        span #{course.get('duration') || 0} hours
+        div.course-change-log
+          i.btn-link.show-change-log.small(data-i18n="courses.show_change_log") 
+          div.hidden.change-log
+            each messages, date in view.courseChangeLog[course.id]
+              span.semibold.small #{date}
+              ul
+                each m in messages
+                  li.small #{m.message}

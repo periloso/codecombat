@@ -1,5 +1,6 @@
 ModalView = require 'views/core/ModalView'
 template = require 'templates/core/contact'
+SubscribeModal = require 'views/core/SubscribeModal'
 
 forms = require 'core/forms'
 {sendContactMessage} = require 'core/contact'
@@ -25,6 +26,11 @@ module.exports = class ContactModal extends ModalView
 
   events:
     'click #contact-submit-button': 'contact'
+    'click [data-toggle="coco-modal"][data-target="core/SubscribeModal"]': 'openSubscribeModal'
+    
+  openSubscribeModal: (e) ->
+    e.stopPropagation()
+    @openModalView new SubscribeModal()
 
   contact: ->
     @playSound 'menu-button-click'
@@ -33,6 +39,7 @@ module.exports = class ContactModal extends ModalView
     res = tv4.validateMultiple contactMessage, contactSchema
     return forms.applyErrorsToForm @$el, res.errors unless res.valid
     @populateBrowserData contactMessage
+    contactMessage = _.merge contactMessage, @options
     contactMessage.country = me.get('country')
     window.tracker?.trackEvent 'Sent Feedback', message: contactMessage
     sendContactMessage contactMessage, @$el
@@ -47,5 +54,5 @@ module.exports = class ContactModal extends ModalView
   updateScreenshot: ->
     return unless @screenshotURL
     screenshotEl = @$el.find('#contact-screenshot').removeClass('secret')
-    screenshotEl.find('a').prop('href', @screenshotURL)
-    screenshotEl.find('img').prop('src', @screenshotURL)
+    screenshotEl.find('a').prop('href', @screenshotURL.replace("http://codecombat.com/", "/"))
+    screenshotEl.find('img').prop('src', @screenshotURL.replace("http://codecombat.com/", "/"))

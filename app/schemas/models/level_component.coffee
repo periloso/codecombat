@@ -10,7 +10,7 @@ class AttacksSelf extends Component
 systems = [
   'action', 'ai', 'alliance', 'collision', 'combat', 'display', 'event', 'existence', 'hearing',
   'inventory', 'movement', 'programming', 'targeting', 'ui', 'vision', 'misc', 'physics', 'effect',
-  'magic'
+  'magic', 'game'
 ]
 
 PropertyDocumentationSchema = c.object {
@@ -23,7 +23,7 @@ PropertyDocumentationSchema = c.object {
   required: ['name', 'type', 'description']
 },
   name: {type: 'string', title: 'Name', description: 'Name of the property.'}
-  i18n: { type: 'object', format: 'i18n', props: ['description', 'context'], description: 'Help translate this property'}
+  i18n: { type: 'object', format: 'i18n', props: ['name', 'description', 'context'], description: 'Help translate this property'}
   context: {
     type: 'object'
     title: 'Example template context'
@@ -134,6 +134,7 @@ LevelComponentSchema = c.object {
     dependencies: []  # TODO: should depend on something by default
     propertyDocumentation: []
     configSchema: {}
+    context: {}
 }
 c.extendNamedProperties LevelComponentSchema  # let's have the name be the first property
 LevelComponentSchema.properties.name.pattern = c.classNamePattern
@@ -171,6 +172,17 @@ _.extend LevelComponentSchema.properties,
     title: 'Official'
     description: 'Whether this is an official CodeCombat Component.'
   searchStrings: {type: 'string'}
+  context: {
+    type: 'object'
+    title: 'Code context'
+    additionalProperties: { type: 'string' }
+    default: {}
+  }
+  i18n: {
+    type: 'object',
+    format: 'i18n',
+    props: ['context'], description: 'Help translate the code context'
+  }
 
 c.extendBasicProperties LevelComponentSchema, 'level.component'
 c.extendSearchableProperties LevelComponentSchema

@@ -38,6 +38,7 @@ module.exports = class GoalManager extends CocoClass
 
   subscriptions:
     'god:new-world-created': 'onNewWorldCreated'
+    'god:new-html-goal-states': 'onNewHTMLGoalStates'
     'level:restarted': 'onLevelRestarted'
 
   backgroundSubscriptions:
@@ -86,6 +87,9 @@ module.exports = class GoalManager extends CocoClass
     @world = e.world
     @updateGoalStates(e.goalStates) if e.goalStates?
 
+  onNewHTMLGoalStates: (e) ->
+    @updateGoalStates(e.goalStates) if e.goalStates?
+
   updateGoalStates: (newGoalStates) ->
     for goalID, goalState of newGoalStates
       continue unless @goalStates[goalID]?
@@ -114,7 +118,7 @@ module.exports = class GoalManager extends CocoClass
       goalStates: @goalStates
       goals: @goals
       overallStatus: overallStatus
-      timedOut: @world.totalFrames is @world.maxTotalFrames and overallStatus not in ['success', 'failure']
+      timedOut: @world? and (@world.totalFrames is @world.maxTotalFrames and overallStatus not in ['success', 'failure'])
     Backbone.Mediator.publish('goal-manager:new-goal-states', event)
 
   checkOverallStatus: (ignoreIncomplete=false) ->
@@ -123,9 +127,14 @@ module.exports = class GoalManager extends CocoClass
     goals = (g for g in goals when not g.optional)
     goals = (g for g in goals when g.team in [undefined, @team]) if @team
     statuses = (goal.status for goal in goals)
-    overallStatus = 'success' if statuses.length > 0 and _.every(statuses, (s) -> s is 'success' or (ignoreIncomplete and s is null))
-    overallStatus = 'failure' if statuses.length > 0 and 'failure' in statuses
-    #console.log 'got overallStatus', overallStatus, 'from goals', goals, 'goalStates', @goalStates, 'statuses', statuses
+    isSuccess = (s) -> s is 'success' or (ignoreIncomplete and s is null)
+    if _.any(goals.map((g) => g.concepts?.length))
+      conceptStatuses = goals.filter((g) => g.concepts?.length).map((g) => g.status)
+      levelStatuses = goals.filter((g) => !g.concepts?.length).map((g) => g.status)
+      overallStatus = if _.all(levelStatuses, isSuccess) and _.any(conceptStatuses, isSuccess) then 'success' else 'failure'
+    else
+      overallStatus = 'success' if statuses.length > 0 and _.every(statuses, isSuccess)
+      overallStatus = 'failure' if statuses.length > 0 and 'failure' in statuses
     overallStatus
 
   # WORLD GOAL TRACKING
@@ -139,6 +148,8 @@ module.exports = class GoalManager extends CocoClass
         keyFrame: 0 # when it became a 'success' or 'failure'
         team: goal.team
         optional: goal.optional
+        hiddenGoal: goal.hiddenGoal
+        concepts: goal.concepts
       }
       @initGoalState(state, [goal.killThangs, goal.saveThangs], 'killed')
       for getTo in goal.getAllToLocations ? []
@@ -264,7 +275,7 @@ module.exports = class GoalManager extends CocoClass
       mostEagerGoal = _.min matchedGoals, 'worldEndsAfter'
       victory = overallStatus is 'success'
       tentative = overallStatus is 'success'
-      @world.endWorld victory, mostEagerGoal.worldEndsAfter, tentative if mostEagerGoal isnt Infinity
+      @world?.endWorld victory, mostEagerGoal.worldEndsAfter, tentative if mostEagerGoal isnt Infinity
 
   updateGoalState: (goalID, thangID, progressObjectName, frameNumber) ->
     # A thang has done something related to the goal!
@@ -291,7 +302,7 @@ module.exports = class GoalManager extends CocoClass
       mostEagerGoal = _.min matchedGoals, 'worldEndsAfter'
       victory = overallStatus is 'success'
       tentative = overallStatus is 'success'
-      @world.endWorld victory, mostEagerGoal.worldEndsAfter, tentative if mostEagerGoal isnt Infinity
+      @world?.endWorld victory, mostEagerGoal.worldEndsAfter, tentative if mostEagerGoal isnt Infinity
 
   goalIsPositive: (goalID) ->
     # Positive goals are completed when all conditions are true (kill all these thangs)

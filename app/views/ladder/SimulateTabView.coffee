@@ -3,6 +3,7 @@ CocoClass = require 'core/CocoClass'
 SimulatorsLeaderboardCollection = require 'collections/SimulatorsLeaderboardCollection'
 Simulator = require 'lib/simulator/Simulator'
 {me} = require 'core/auth'
+loadAetherLanguage = require("lib/loadAetherLanguage");
 
 module.exports = class SimulateTabView extends CocoView
   id: 'simulate-tab-view'
@@ -11,31 +12,21 @@ module.exports = class SimulateTabView extends CocoView
   events:
     'click #simulate-button': 'onSimulateButtonClick'
 
-  constructor: (options) ->
-    super(options)
+  initialize: ->
     @simulatorsLeaderboardData = new SimulatorsLeaderboardData(me)
     @simulatorsLeaderboardDataRes = @supermodel.addModelResource(@simulatorsLeaderboardData, 'top_simulators', {cache: false})
     @simulatorsLeaderboardDataRes.load()
-    require 'vendor/aether-javascript'
-    require 'vendor/aether-python'
-    require 'vendor/aether-coffeescript'
-    require 'vendor/aether-lua'
-    require 'vendor/aether-clojure'
-    require 'vendor/aether-io'
+    Promise.all(
+      ["javascript", "python", "coffeescript", "lua"].map(
+        loadAetherLanguage
+      )
+    )
 
   onLoaded: ->
     super()
     @render()
-    if (document.location.hash is '#simulate' or @options.level.get('type') is 'course-ladder') and not @simulator
+    if not @simulator and (document.location.hash is '#simulate' or @options.level.get('slug') not in ['ace-of-coders', 'zero-sum'])
       @startSimulating()
-
-  getRenderData: ->
-    ctx = super()
-    ctx.simulationStatus = @simulationStatus
-    ctx.simulatorsLeaderboardData = @simulatorsLeaderboardData
-    ctx.numberOfGamesInQueue = @simulatorsLeaderboardData.numberOfGamesInQueue
-    ctx._ = _
-    ctx
 
   afterRender: ->
     super()
@@ -64,6 +55,7 @@ module.exports = class SimulateTabView extends CocoView
       # Work around simulator getting super slow on Chrome
       fetchAndSimulateTaskOriginal = @simulator.fetchAndSimulateTask
       @simulator.fetchAndSimulateTask = =>
+        return if @destroyed
         if @simulator.simulatedByYou >= 20
           console.log '------------------- Destroying  Simulator and making a new one -----------------'
           @simulator.destroy()
@@ -145,6 +137,7 @@ class SimulatorsLeaderboardData extends CocoClass
     return me.id in (user.id for user in @topSimulators.models)
 
   nearbySimulators: ->
+    return [] if not @playersAbove?.models
     l = []
     above = @playersAbove.models
     l = l.concat(above)

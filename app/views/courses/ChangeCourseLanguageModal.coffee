@@ -1,3 +1,4 @@
+require('app/styles/courses/change-course-language-modal.sass')
 ModalView = require 'views/core/ModalView'
 template = require 'templates/courses/change-course-language-modal'
 
@@ -9,7 +10,7 @@ module.exports = class ChangeCourseLanguageModal extends ModalView
     'click .lang-choice-btn': 'onClickLanguageChoiceButton'
 
   onClickLanguageChoiceButton: (e) ->
-    @chosenLanguage = $(e.target).data('language')
+    @chosenLanguage = $(e.target).closest('.lang-choice-btn').data('language')
     aceConfig = _.clone(me.get('aceConfig') or {})
     aceConfig.language = @chosenLanguage
     me.set('aceConfig', aceConfig)
